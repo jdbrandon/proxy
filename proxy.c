@@ -17,6 +17,8 @@ typedef struct req_t req_t;
 typedef struct sockaddr_in sockaddr_in;
 typedef struct hostent hostent;
 
+int process_request(int, req_t *);
+
 /* You won't lose style points for including these long lines in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 static const char *accept_hdr = "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n";
@@ -26,6 +28,7 @@ int main(int argc, char** argv)
 {
     int listenport, listenfd, connfd;
     unsigned clientlen;
+    req_t request;
     sockaddr_in clientaddr;
     hostent* clientinfo;
     char* haddrp;
@@ -51,10 +54,24 @@ int main(int argc, char** argv)
         clientinfo = gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr,
                                    sizeof(clientaddr.sin_addr.s_addr), AF_INET);
         haddrp = inet_ntoa(clientaddr.sin_addr);
-        //request = process_request();
+        process_request(connfd, &request);
         //response = forward_request(request);
         //forward_response(response);
     }
 
+    return 0;
+}
+
+int process_request(int fd, req_t* req){
+    size_t n;
+    char buf[MAXLINE];
+    rio_t rio;
+    req = req;
+    
+    Rio_readinitb(&rio, fd);
+    while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
+        printf("received %zd bytes\n", n);
+        printf("message: (%s)\n", buf);
+    }
     return 0;
 }
