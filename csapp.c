@@ -767,12 +767,14 @@ int open_clientfd_r(char *hostname, int port) {
 
     /* Create the socket descriptor */
     if ((clientfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        fprintf(stderr, "socket");
         return -1;
     }
 
     /* Get a list of addrinfo structs */
     sprintf(port_str, "%d", port);
     if ((rv = getaddrinfo(hostname, port_str, NULL, &addlist)) != 0) {
+        fprintf(stderr, "addrinfo %s %s", hostname, port_str);
         return -1;
     }
   
@@ -789,6 +791,7 @@ int open_clientfd_r(char *hostname, int port) {
     freeaddrinfo(addlist);
     if (!p) { /* all connects failed */
         close(clientfd);
+        fprintf(stderr, "close");
         return -1;
     }
     else { /* one of the connects succeeded */
