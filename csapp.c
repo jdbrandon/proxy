@@ -791,7 +791,7 @@ int open_clientfd_r(char *hostname, int port) {
     freeaddrinfo(addlist);
     if (!p) { /* all connects failed */
         close(clientfd);
-        fprintf(stderr, "close");
+        fprintf(stderr, "close %s %s", hostname, port_str);
         return -1;
     }
     else { /* one of the connects succeeded */
