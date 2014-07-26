@@ -19,7 +19,7 @@ typedef struct hostent hostent;
 
 int process_request(int, req_t *);
 void parse_req(char*, req_t*);
-char *handle_buf(char*);
+char *handle_hdr(char*);
 
 /* You won't lose style points for including these long lines in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
@@ -62,19 +62,26 @@ int main(int argc, char** argv)
     return 0;
 }
 
+/* Read a request from a connection socket and parse its information into a 
+ * req_t struct.
+ * Initally based on csapp echo() p.911
+ */
 int process_request(int fd, req_t* req){
     size_t n;
     char buf[MAXLINE];
     rio_t rio;
     req = req;
-    
+
+    //Parse domain and path information    
     Rio_readinitb(&rio, fd);
     if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
         parse_req(buf, req);
         printf("domain: %s\tpath: %s\n", req->domain, req->path);
     }
     else return -1;
+
     req->hdrs = NULL;
+    //parse header information
     while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
         if(strcmp(buf, "\r\n") == 0)
             break;
@@ -84,14 +91,14 @@ int process_request(int fd, req_t* req){
                 fprintf(stderr,"malloc failed\n");
                 exit(1); //TODO:may not want to fail here
             }
-            strcpy(req->hdrs, handle_buf(buf));
+            strcpy(req->hdrs, handle_hdr(buf));
         } else {
             req->hdrs = (char*) realloc(req->hdrs, strlen(req->hdrs)+strlen(buf)+1);
             if(req->hdrs == NULL){
                 fprintf(stderr,"realloc failed\n");
                 exit(1); //TODO:may not want to fail here
             }
-            strcat(req->hdrs, handle_buf(buf));
+            strcat(req->hdrs, handle_hdr(buf));
         }
     }
     printf("hdrs: %s\n", req->hdrs);
@@ -99,6 +106,10 @@ int process_request(int fd, req_t* req){
     return 0;
 }
 
+/* Use string library functions to extract domain and path from
+ * an HTTP request.
+ * TODO: handle malformed HTTP requests.
+ */
 void parse_req(char* buf, req_t* req){
     char* save;
     strtok_r(buf, " ", &save);			//GET
@@ -107,7 +118,11 @@ void parse_req(char* buf, req_t* req){
     req->path = strtok_r(NULL, " ", &save);	//path
 }
 
-char *handle_buf(char* buf){
+/* Parse a header, if it is a header that our proxy defines
+ * statically replace the header with our predefined version.
+ * Otherwise just add the the header to the existing header list
+ */
+char *handle_hdr(char* buf){
     char* cp, * head;
     size_t size;
     size = strlen(buf) > strlen(user_agent_hdr) ? strlen(buf) : strlen(user_agent_hdr);
