@@ -72,12 +72,8 @@ int process_request(int fd, req_t* req){
     Rio_readinitb(&rio, fd);
     if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
         parse_req(buf, req);
-        printf("domain: %s\tpath: %s\n", req->domain, req->path);
     }
     else return -1;
-    printf("d: %s\n", req->domain);
-    printf("p: %s\n", req->path);
-    printf("hdrs: %s\n", req->hdrs);
 
     req->hdrs = NULL;
     //parse header information
@@ -92,9 +88,6 @@ int process_request(int fd, req_t* req){
             strcat(req->hdrs, handle_hdr(buf));
         }
     }
-    printf("d: %s\n", req->domain);
-    printf("p: %s\n", req->path);
-    printf("hdrs: %s\n", req->hdrs);
     return 0;
 }
 
@@ -152,7 +145,7 @@ void forward_request(req_t request){
     size_t n, total_read;
     char *name, *portstr, http[1024], buf[MAXLINE];
     rio_t rio;
-    printf("domain:%s path: %s hdrs: %s\n", request.domain, request.path, request.hdrs);
+    //printf("domain:%s path: %s hdrs: %s\n", request.domain, request.path, request.hdrs);
     name = strtok(request.domain, ":");
     portstr = strtok(NULL, ":");
     if(portstr != NULL)
@@ -160,7 +153,6 @@ void forward_request(req_t request){
     else server = Open_clientfd_r(name, 80);
     sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
     strcat(http, request.hdrs);
-    printf("fwd: %s\n", http);
     Rio_writen(server, http, strlen(http));
     Rio_writen(server, "\r\n", 2);
     Rio_readinitb(&rio, server);
@@ -168,7 +160,6 @@ void forward_request(req_t request){
     total_read = 0;
     while((n = Rio_readlineb(&rio, buf, MAXLINE)) > 0){
         total_read += n;
-        printf("response:\n%s", buf);
         //write response to client
     }
     Free(request.domain);
