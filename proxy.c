@@ -20,7 +20,7 @@ typedef struct hostent hostent;
 int process_request(int, req_t *);
 void parse_req(char*, req_t*);
 char *handle_hdr(char*);
-void forward_request(req_t);
+void forward_request(int, req_t);
 
 /* You won't lose style points for including these long lines in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
@@ -52,8 +52,8 @@ int main(int argc, char** argv)
                                    sizeof(clientaddr.sin_addr.s_addr), AF_INET);
         haddrp = inet_ntoa(clientaddr.sin_addr);
         process_request(connfd, &request);
-        forward_request(request);
-        //forward_response(response);
+        forward_request(connfd, request);
+        close(connfd);
     }
 
     return 0;
@@ -68,37 +68,27 @@ int process_request(int fd, req_t* req){
     char buf[MAXLINE];
     rio_t rio;
 
+    req->domain = NULL;
+    req->path = NULL;
+    req->hdrs = NULL;
+
     //Parse domain and path information    
     Rio_readinitb(&rio, fd);
     if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
         parse_req(buf, req);
-    	//sscanf(buf, "%s %s %s", method, uri, version);
-		//if (strcasecmp(method, "GET")){
-		//	clienterror(fd, method, "501", "Not Implemented", "Sorry not supported");
-		//	return;
-		//}
-		//if(strcmp(version, "1.0?") && strcmp(version, "1.1")){
-		//	clienterror("version not supported");
-		//
-		//	return;
-		//}
-		// 
-		// anything with uri not found?
-	
-	
-	}
+    }
     else return -1;
-
-    req->hdrs = NULL;
     //parse header information
     while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
         if(strcmp(buf, "\r\n") == 0)
             break;
         if(req->hdrs == NULL){
-            req->hdrs = (char*)Malloc(strlen(buf)+1);
+            req->hdrs = Malloc(strlen(buf)+1);
             strcpy(req->hdrs, handle_hdr(buf));
         } else {
-            req->hdrs = (char*) Realloc(req->hdrs, strlen(req->hdrs)+strlen(buf)+1);
+            n = strlen(req->hdrs) + strlen(buf) + 1;
+            printf("size: %zd\n",n);
+            req->hdrs = Realloc(req->hdrs, strlen(req->hdrs)+strlen(buf)+1);
             strcat(req->hdrs, handle_hdr(buf));
         }
     }
@@ -114,10 +104,10 @@ void parse_req(char* buf, req_t* req){
     strtok_r(buf, " ", &save);			//GET
     strtok_r(NULL, "//", &save); 		//http:
     p = strtok_r(NULL, "/", &save);	 	//domain
-    req->domain = (char*)Malloc(strlen(p)+1);
+    req->domain = Malloc(strlen(p)+1);
     strcpy(req->domain, p);
     p = strtok_r(NULL, " ", &save);		//path
-    req->path = (char*)Malloc(strlen(p)+1);
+    req->path = Malloc(strlen(p)+1);
     strcpy(req->path, p);
 }
 
@@ -154,19 +144,15 @@ char *handle_hdr(char* buf){
 /* Takes a request and forwards it to its destination server by opening a client
  * connection. Returns the response of the destination server.
  */
-void forward_request(req_t request){
+void forward_request(int fd, req_t request){
     int server;
     size_t n, total_read;
     char *name, *portstr, http[1024], buf[MAXLINE];
     rio_t rio;
-    //printf("domain:%s path: %s hdrs: %s\n", request.domain, request.path, request.hdrs);
+
     name = strtok(request.domain, ":");
     portstr = strtok(NULL, ":");
-
-	// TODO
-    // if not in cache, contact server. Else retrieve from cache
-	
-	if(portstr != NULL)
+    if(portstr != NULL)
         server = Open_clientfd_r(name, atoi(portstr));
     else server = Open_clientfd_r(name, 80);
     sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
@@ -178,7 +164,7 @@ void forward_request(req_t request){
     total_read = 0;
     while((n = Rio_readlineb(&rio, buf, MAXLINE)) > 0){
         total_read += n;
-        //write response to client
+        Rio_writen(fd, buf, n);
     }
     Free(request.domain);
     Free(request.path);
