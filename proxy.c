@@ -148,7 +148,11 @@ void forward_request(req_t request){
     //printf("domain:%s path: %s hdrs: %s\n", request.domain, request.path, request.hdrs);
     name = strtok(request.domain, ":");
     portstr = strtok(NULL, ":");
-    if(portstr != NULL)
+
+	// TODO
+    // if not in cache, contact server. Else retrieve from cache
+	
+	if(portstr != NULL)
         server = Open_clientfd_r(name, atoi(portstr));
     else server = Open_clientfd_r(name, 80);
     sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
