@@ -72,7 +72,21 @@ int process_request(int fd, req_t* req){
     Rio_readinitb(&rio, fd);
     if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
         parse_req(buf, req);
-    }
+    	//sscanf(buf, "%s %s %s", method, uri, version);
+		//if (strcasecmp(method, "GET")){
+		//	clienterror(fd, method, "501", "Not Implemented", "Sorry not supported");
+		//	return;
+		//}
+		//if(strcmp(version, "1.0?") && strcmp(version, "1.1")){
+		//	clienterror("version not supported");
+		//
+		//	return;
+		//}
+		// 
+		// anything with uri not found?
+	
+	
+	}
     else return -1;
 
     req->hdrs = NULL;
