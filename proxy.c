@@ -83,12 +83,11 @@ int process_request(int fd, req_t* req){
         if(strcmp(buf, "\r\n") == 0)
             break;
         if(req->hdrs == NULL){
-            req->hdrs = Malloc(strlen(buf)+1);
+            req->hdrs = Malloc(n+1);
             strcpy(req->hdrs, handle_hdr(buf));
         } else {
             n = strlen(req->hdrs) + strlen(buf) + 1;
-            printf("size: %zd\n",n);
-            req->hdrs = Realloc(req->hdrs, strlen(req->hdrs)+strlen(buf)+1);
+            req->hdrs = Realloc(req->hdrs,strlen(req->hdrs)+ n);
             strcat(req->hdrs, handle_hdr(buf));
         }
     }
@@ -152,6 +151,7 @@ void forward_request(int fd, req_t request){
 
     name = strtok(request.domain, ":");
     portstr = strtok(NULL, ":");
+    if(name == NULL) return;
     if(portstr != NULL)
         server = Open_clientfd_r(name, atoi(portstr));
     else server = Open_clientfd_r(name, 80);
