@@ -20,6 +20,7 @@ typedef struct hostent hostent;
 int process_request(int, req_t *);
 void parse_req(char*, req_t*);
 char *handle_hdr(char*);
+void forward_request(req_t);
 
 /* You won't lose style points for including these long lines in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
@@ -42,20 +43,16 @@ int main(int argc, char** argv)
         exit(1);
     }
     listenport = atoi(argv[1]);
-    listenfd = open_listenfd(listenport);
-    if(listenfd == -1){
-        fprintf(stderr,"error opening listening socket\n");
-        exit(1);
-    }
+    listenfd = Open_listenfd(listenport);
     
     while(1){
         clientlen = sizeof(clientaddr);
-        connfd = accept(listenfd, (SA *) &clientaddr, &clientlen); 
+        connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen); 
         clientinfo = gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr,
                                    sizeof(clientaddr.sin_addr.s_addr), AF_INET);
         haddrp = inet_ntoa(clientaddr.sin_addr);
         process_request(connfd, &request);
-        //response = forward_request(request);
+        forward_request(request);
         //forward_response(response);
     }
 
@@ -70,7 +67,6 @@ int process_request(int fd, req_t* req){
     size_t n;
     char buf[MAXLINE];
     rio_t rio;
-    req = req;
 
     //Parse domain and path information    
     Rio_readinitb(&rio, fd);
@@ -79,6 +75,9 @@ int process_request(int fd, req_t* req){
         printf("domain: %s\tpath: %s\n", req->domain, req->path);
     }
     else return -1;
+    printf("d: %s\n", req->domain);
+    printf("p: %s\n", req->path);
+    printf("hdrs: %s\n", req->hdrs);
 
     req->hdrs = NULL;
     //parse header information
@@ -86,23 +85,16 @@ int process_request(int fd, req_t* req){
         if(strcmp(buf, "\r\n") == 0)
             break;
         if(req->hdrs == NULL){
-            req->hdrs = (char*)malloc(strlen(buf)+1);
-            if(req->hdrs == NULL){
-                fprintf(stderr,"malloc failed\n");
-                exit(1); //TODO:may not want to fail here
-            }
+            req->hdrs = (char*)Malloc(strlen(buf)+1);
             strcpy(req->hdrs, handle_hdr(buf));
         } else {
-            req->hdrs = (char*) realloc(req->hdrs, strlen(req->hdrs)+strlen(buf)+1);
-            if(req->hdrs == NULL){
-                fprintf(stderr,"realloc failed\n");
-                exit(1); //TODO:may not want to fail here
-            }
+            req->hdrs = (char*) Realloc(req->hdrs, strlen(req->hdrs)+strlen(buf)+1);
             strcat(req->hdrs, handle_hdr(buf));
         }
     }
+    printf("d: %s\n", req->domain);
+    printf("p: %s\n", req->path);
     printf("hdrs: %s\n", req->hdrs);
-    free(req->hdrs);//TODO: move this to after request has been forwarded
     return 0;
 }
 
@@ -111,11 +103,15 @@ int process_request(int fd, req_t* req){
  * TODO: handle malformed HTTP requests.
  */
 void parse_req(char* buf, req_t* req){
-    char* save;
+    char* save, *p;
     strtok_r(buf, " ", &save);			//GET
     strtok_r(NULL, "//", &save); 		//http:
-    req->domain = strtok_r(NULL, "/", &save); 	//domain
-    req->path = strtok_r(NULL, " ", &save);	//path
+    p = strtok_r(NULL, "/", &save);	 	//domain
+    req->domain = (char*)Malloc(strlen(p)+1);
+    strcpy(req->domain, p);
+    p = strtok_r(NULL, " ", &save);		//path
+    req->path = (char*)Malloc(strlen(p)+1);
+    strcpy(req->path, p);
 }
 
 /* Parse a header, if it is a header that our proxy defines
@@ -126,14 +122,8 @@ char *handle_hdr(char* buf){
     char* cp, * head;
     size_t size;
     size = strlen(buf) > strlen(user_agent_hdr) ? strlen(buf) : strlen(user_agent_hdr);
-    cp = (char*) malloc(size+1);
-    if(cp == NULL){
-        fprintf(stderr, "malloc failed\n");
-    }
-    head = (char*) malloc(51);
-    if(head == NULL){
-        fprintf(stderr, "malloc failed\n");
-    }
+    cp = (char*) Malloc(size+1);
+    head = (char*) Malloc(51);
     strcpy(cp, buf);
 
     strcpy(head, strtok(buf, ":"));
@@ -149,7 +139,39 @@ char *handle_hdr(char* buf){
         strcpy(cp, prox_hdr);
 
     strcpy(buf, cp);
-    free(head);
-    free(cp);
+    Free(head);
+    Free(cp);
     return buf;
+}
+
+/* Takes a request and forwards it to its destination server by opening a client
+ * connection. Returns the response of the destination server.
+ */
+void forward_request(req_t request){
+    int server;
+    size_t n, total_read;
+    char *name, *portstr, http[1024], buf[MAXLINE];
+    rio_t rio;
+    printf("domain:%s path: %s hdrs: %s\n", request.domain, request.path, request.hdrs);
+    name = strtok(request.domain, ":");
+    portstr = strtok(NULL, ":");
+    if(portstr != NULL)
+        server = Open_clientfd_r(name, atoi(portstr));
+    else server = Open_clientfd_r(name, 80);
+    sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
+    strcat(http, request.hdrs);
+    printf("fwd: %s\n", http);
+    Rio_writen(server, http, strlen(http));
+    Rio_writen(server, "\r\n", 2);
+    Rio_readinitb(&rio, server);
+
+    total_read = 0;
+    while((n = Rio_readlineb(&rio, buf, MAXLINE)) > 0){
+        total_read += n;
+        printf("response:\n%s", buf);
+        //write response to client
+    }
+    Free(request.domain);
+    Free(request.path);
+    Free(request.hdrs);
 }
