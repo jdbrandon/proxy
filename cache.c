@@ -24,10 +24,7 @@ void cache_deinit(cache_obj* cache){
 int size(cache_obj* cache, int num_entries){
 	int size;
 	int i = 0;
-	// sum up obj_size of cache_obj or keep a global variable
 
-	//check that whatever is after the last entry in a full
-	//cache is NULL
 	while(i < num_entries){
 		size += cache[i].obj_size;
 		i++;
