@@ -1,11 +1,16 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include "cache.h"
+#include "sbuf.h"
 #include "csapp.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+#define NTHREADS 4
+#define SBUFSIZE 16
+
 
 struct req_t {
     char* domain;
@@ -13,7 +18,6 @@ struct req_t {
     char* hdrs;
 };
 typedef struct req_t req_t;
-
 typedef struct sockaddr_in sockaddr_in;
 typedef struct hostent hostent;
 
@@ -21,6 +25,7 @@ int process_request(int, req_t *);
 void parse_req(char*, req_t*);
 char *handle_hdr(char*);
 void forward_request(int, req_t);
+void *thread(void* vargp);
 
 /* You won't lose style points for including these long lines in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
@@ -29,35 +34,69 @@ static const char *accept_encoding_hdr = "Accept-Encoding: gzip, deflate\r\n";
 static const char *conn_hdr = "Connection: close\r\n";
 static const char *prox_hdr = "Proxy-Connection: close\r\n";
 
+sbuf_t sbuf;
+sem_t mutex, w;
+int num_entries;
+cache_obj * cache;
+
+
 int main(int argc, char** argv)
 {
-    int listenport, listenfd, connfd;
+    int i, listenport, listenfd, connfd;
     unsigned clientlen;
-    req_t request;
     sockaddr_in clientaddr;
-    hostent* clientinfo;
-    char* haddrp;
+    pthread_t tid;
+		
+	Signal(SIGPIPE, SIG_IGN);	
+
+	Sem_init(&mutex, 0, 1);
+	Sem_init(&w, 0, 1);
+	num_entries = 0;
+	cache = NULL;
 
     if(argc < 2){
         printf("usage: %s <port number to bind and listen>\n", argv[0]);
         exit(1);
     }
-    listenport = atoi(argv[1]);
-    listenfd = Open_listenfd(listenport);
     
+	listenport = atoi(argv[1]);
+    sbuf_init(&sbuf, SBUFSIZE);
+	listenfd = Open_listenfd(listenport);
+    clientlen = sizeof(clientaddr);
+  
+	for(i = 0; i < NTHREADS; i++) /* prethreading, creating worker threads */
+		Pthread_create(&tid, NULL, thread, &clientaddr);
+ 
     while(1){
-        clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen); 
-        clientinfo = gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr,
-                                   sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-        haddrp = inet_ntoa(clientaddr.sin_addr);
-        process_request(connfd, &request);
-        forward_request(connfd, request);
-        close(connfd);
-    }
+    	sbuf_insert(&sbuf, connfd);	// put in buffer    
+	}
 
     return 0;
 }
+
+
+void *thread(void *vargp){
+	// avoid memory leak
+	Pthread_detach(pthread_self());
+	sockaddr_in clientaddr = *((sockaddr_in *) vargp);
+	hostent* clientinfo;
+    req_t request;
+    char* haddrp;
+	
+	while(1){
+		int connfd = sbuf_remove(&sbuf);
+		clientinfo = gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr,
+                                   sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+		haddrp = inet_ntoa(clientaddr.sin_addr);
+		
+        process_request(connfd, &request);
+        forward_request(connfd, request);
+        Close(connfd);
+	
+	}	
+}
+
 
 /* Read a request from a connection socket and parse its information into a 
  * req_t struct.
@@ -74,13 +113,14 @@ int process_request(int fd, req_t* req){
 
     //Parse domain and path information    
     Rio_readinitb(&rio, fd);
-    if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
+	if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
         parse_req(buf, req);
     }
     else return -1;
     //parse header information
     while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
-        if(strcmp(buf, "\r\n") == 0)
+        
+		if(strcmp(buf, "\r\n") == 0)
             break;
         if(req->hdrs == NULL){
             req->hdrs = Malloc(n+1);
@@ -146,26 +186,58 @@ char *handle_hdr(char* buf){
 void forward_request(int fd, req_t request){
     int server;
     size_t n, total_read;
+	cache_obj* entry;
     char *name, *portstr, http[1024], buf[MAXLINE];
-    rio_t rio;
+    int cache_err;
+	rio_t rio;
 
     name = strtok(request.domain, ":");
     portstr = strtok(NULL, ":");
     if(name == NULL) return;
-    if(portstr != NULL)
-        server = Open_clientfd_r(name, atoi(portstr));
-    else server = Open_clientfd_r(name, 80);
-    sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
-    strcat(http, request.hdrs);
-    Rio_writen(server, http, strlen(http));
-    Rio_writen(server, "\r\n", 2);
-    Rio_readinitb(&rio, server);
+    if(portstr == NULL) portstr = "80";
+    
+	// checking the cache is still updating it (age)
+	/*P(&w);
+	if((entry = in_cache(name, num_entries, cache)) != NULL){
+		// is that it?
+		V(&w);
+		strcpy(entry->buf, buf);
+		n = entry->obj_size;
+		Rio_writen(fd, buf, n);
+	}
+	else {
+		V(&w);*/
+    	server = Open_clientfd_r(name, atoi(portstr));
+    	sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
+    	strcat(http, request.hdrs);
+    	Rio_writen(server, http, strlen(http));
+    	Rio_writen(server, "\r\n", 2);
+    	Rio_readinitb(&rio, server);
 
-    total_read = 0;
-    while((n = Rio_readlineb(&rio, buf, MAXLINE)) > 0){
-        total_read += n;
-        Rio_writen(fd, buf, n);
-    }
+    	total_read = 0;
+    	while((n = Rio_readlineb(&rio, buf, MAXLINE)) > 0){
+		
+        	//if(total_read+n > MAX_OBJECT_SIZE){
+				
+				// discard buf?
+			//	break;	
+			//}	
+
+			total_read += n;
+        	Rio_writen(fd, buf, n);
+    	}
+		
+
+		// cache update, critical section
+		if(total_read <= MAX_OBJECT_SIZE){
+			P(&w);
+			cache = cache_write(name, buf, num_entries, cache);
+			num_entries++;
+			//printf("num entries is now %d\n", num_entries);
+			V(&w);
+		} 
+	//}
+
     Free(request.domain);
     Free(request.path);
     Free(request.hdrs);
