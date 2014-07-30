@@ -1,3 +1,8 @@
+/* I removed the Null checks for Malloc because that check is redundant.
+ * Malloc with a capitol M is a wrapper defined in csapp.c that performs
+ * a null check before returing. If malloc fails then the wrapper calls
+ * unix_error and the program exits with error status.
+ */
 #include "cache.h"
 
 static size_t cache_size = 0;
@@ -11,6 +16,13 @@ cache_obj* in_cache(char* name, int num_entries, cache_obj* cache){
         //printf("cache is %lx\n", (long)cache);
         if(!strcmp(name, cache->name)){
             //return to be read
+
+/* I think we may need to reevaluate this, or I need to have this explained to me
+ * Why are we aging a cache line when we successfully find it? Usually when a cache
+ * hit occurs the entires age is reset because it has been recently referenced.
+ * A cache entry should be aged every time it is checked and reset if it is a hit.
+ */
+
             cache->age++;
             //printf("in_cache returned positive\n");
             return cache;
@@ -19,8 +31,7 @@ cache_obj* in_cache(char* name, int num_entries, cache_obj* cache){
         if(cache->next == NULL){
             break;
         }
-
-        cache = (cache_obj*)cache->next;
+        cache = cache->next;
     }
 
 
@@ -31,28 +42,12 @@ cache_obj* in_cache(char* name, int num_entries, cache_obj* cache){
 cache_obj* cache_init(cache_obj* cache, char* name, char buf[]){
     //printf("cache_init called\n");    
     size_t alloc_size = (strlen(name)+1) + (strlen(buf)+1) + 2*sizeof(int) + sizeof(cache_obj*);
-    cache = (cache_obj*) Malloc(sizeof(cache_obj));
-
-    if(cache == NULL){
-        // Malloc failed
-        return NULL;
-    }
+    cache = Malloc(sizeof(cache_obj));
 
     cache->name = (char *)Malloc(strlen(name)+1);
-
-    if(cache->name == NULL){
-        return NULL;
-    }
-
     strcpy(cache->name, name);
-    
-    
+
     cache->buf = (char *)Malloc(strlen(buf)+1);
-
-    if(cache->buf == NULL){
-        return NULL;
-    }
-
     strcpy(cache->buf, buf);
 
     cache->obj_size = alloc_size;
@@ -68,6 +63,8 @@ cache_obj* cache_init(cache_obj* cache, char* name, char buf[]){
     return cache;
 }
 
+/* I could use some documentation here please
+ */
 int set_next(cache_obj* entry){
     //printf("in_cache called\n");
     //printf("num_entries is %d\n", num_entries);
@@ -84,6 +81,7 @@ int set_next(cache_obj* entry){
     //printf("in_cache returned negative\n");
     return 1;
 }
+
 cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
     cache_obj* spot;
     int next_set;
@@ -92,28 +90,15 @@ cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
 
     if(cache_size == MAX_CACHE_SIZE) {
         spot = cache_evict(cache, num_entries, alloc_size);
-        spot = free_spot(spot);
+        free_spot(spot);
     }
           else {
         spot = (cache_obj*)Malloc(sizeof(cache_obj));
     }
 
-    if(spot == NULL){
-        // out of memory
-        return NULL;
-    }
-
     spot->name = (char *)Malloc(strlen(name)+1);
 
-    if(spot->name == NULL){
-        return NULL;
-    }
-
     spot->buf = (char *)Malloc(strlen(buf)+1);
-
-    if(spot->buf == NULL){
-        return NULL;
-    }
 
     strcpy(spot->name, name);
     strcpy(spot->buf, buf);
@@ -134,7 +119,7 @@ cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
     return spot;
 }
 
-cache_obj* free_spot(cache_obj* entry){
+void free_spot(cache_obj* entry){
     //printf("free_spot called\n");
     cache_size -= entry->obj_size;
 
@@ -143,14 +128,14 @@ cache_obj* free_spot(cache_obj* entry){
     //Free(entry);
 
      //printf("free_spot ret\n");
-    return entry;
 }
 
 void cache_deinit(cache_obj* cache, int num_entries){
     int i;
     cache_obj* next;
     for(i = 0; i < num_entries; i++){
-        next = (cache_obj*)cache->next;
+        next = cache->next;
+        free_spot(cache);
         Free(cache);
         if(next == NULL){
             break;
@@ -214,7 +199,7 @@ cache_obj* cache_evict(cache_obj* cache, int num_entries, size_t alloc_size){
         else if (cache->next == NULL){
             break;
         }
-        cache = (cache_obj*)cache->next;
+        cache = cache->next;
 
         i++;
     }
