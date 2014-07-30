@@ -1,3 +1,13 @@
+/* Proxy Lab
+ * Jeff Brandon - jdbrando@andrew.cmu.edu
+ * Cory Pruce - cpruce@andrew.cmu.edu
+ *
+ * We worked together to implement a proxy server with cacheing and concurrency
+ * Jeff wrote the intial proxy while Cory focussed on implementing the cache
+ * and concurrency support. After the basic proxy was finished Jeff helped debug
+ * the cache. For more information on who did what we can make our github repository
+ * public for your viewing pleasure.
+ */
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -11,15 +21,16 @@
 #define NTHREADS 4
 #define SBUFSIZE 16
 
-
+/* Struct that represents a parsed request.
+ */
 struct req_t {
     char* domain;
     char* path;
     char* hdrs;
 };
 typedef struct req_t req_t;
-typedef struct sockaddr_in sockaddr_in;
-typedef struct hostent hostent;
+typedef struct sockaddr_in sockaddr_in;	//for my own sanity
+typedef struct hostent hostent; 	//ditto
 
 int process_request(int, req_t *);
 void parse_req(char*, req_t*);
@@ -34,10 +45,10 @@ static const char *accept_encoding_hdr = "Accept-Encoding: gzip, deflate\r\n";
 static const char *conn_hdr = "Connection: close\r\n";
 static const char *prox_hdr = "Proxy-Connection: close\r\n";
 
-sbuf_t sbuf;
-sem_t mutex, w;
-int num_entries;
-cache_obj * cache;
+sbuf_t sbuf; 		//Shared buffer
+sem_t mutex, w; 	//Mutual exclusion enforced on buffer
+int num_entries;	//Count of cache entries
+cache_obj * cache;	//Front of the Cache (implemented as a linked list)
 
 
 int main(int argc, char** argv)
@@ -47,15 +58,15 @@ int main(int argc, char** argv)
     sockaddr_in clientaddr;
     pthread_t tid;
 		
-    Sem_init(&mutex, 0, 1);
-    Sem_init(&w, 0, 1);
-    num_entries = 0;
-    cache = NULL;
-    
     if(argc < 2){
         printf("usage: %s <port number to bind and listen>\n", argv[0]);
         exit(1);
     }
+    
+    Sem_init(&mutex, 0, 1);
+    Sem_init(&w, 0, 1);
+    num_entries = 0;
+    cache = NULL;
     
     listenport = atoi(argv[1]);
     sbuf_init(&sbuf, SBUFSIZE);
@@ -73,7 +84,9 @@ int main(int argc, char** argv)
     return 0;
 }
 
-
+/* Consumes connection file descriptors from the shared buffer and 
+ * processes them.
+ */
 void *thread(void *vargp){
     // avoid memory leak
     Pthread_detach(pthread_self());
@@ -91,11 +104,11 @@ void *thread(void *vargp){
         process_request(connfd, &request);
         forward_request(connfd, request);
         Close(connfd);	
-	}	
+    }	
 }
 
 
-/* Read a request from a connection socket and parse its information into a 
+/* Read a request from a connection socket and parses its information into a 
  * req_t struct.
  * Initally based on csapp echo() p.911
  */
@@ -184,7 +197,6 @@ void forward_request(int fd, req_t request){
     size_t n, total_read;
     cache_obj* entry;
     char *name, *portstr, http[1024], buf[MAXLINE], cachebuf[MAX_OBJECT_SIZE];
-    //int cache_err;
     rio_t rio;
 
     cachebuf[0] = '\0';
@@ -196,11 +208,8 @@ void forward_request(int fd, req_t request){
     // checking the cache is still updating it (age)
     P(&w);
     if((entry = in_cache(request.path, num_entries, cache)) != NULL){
-        // is that it?
         V(&w);
-        strcpy(entry->buf, buf);
-        n = entry->obj_size;
-        Rio_writen(fd, buf, n);
+        Rio_writen(fd, entry->buf, entry->obj_size);
     } else {
         V(&w);
 
@@ -224,7 +233,6 @@ void forward_request(int fd, req_t request){
             P(&w);
             cache = cache_write(request.path, cachebuf, num_entries, cache);
             num_entries++;
-            //printf("num entries is now %d\n", num_entries);
             V(&w);
         } 
     }
