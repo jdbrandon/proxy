@@ -51,7 +51,7 @@ int main(int argc, char** argv)
 	Sem_init(&w, 0, 1);
 	num_entries = 0;
 	cache = NULL;
-    
+
     if(argc < 2){
         printf("usage: %s <port number to bind and listen>\n", argv[0]);
         exit(1);
@@ -88,7 +88,6 @@ void *thread(void *vargp){
                                    sizeof(clientaddr.sin_addr.s_addr), AF_INET);
 		haddrp = inet_ntoa(clientaddr.sin_addr);
 		
-		// switch to Open_clientfd_r?
         process_request(connfd, &request);
         forward_request(connfd, request);
         Close(connfd);
@@ -185,9 +184,9 @@ char *handle_hdr(char* buf){
 void forward_request(int fd, req_t request){
     int server;
     size_t n, total_read;
-	//cache_obj* entry;
+	cache_obj* entry;
     char *name, *portstr, http[1024], buf[MAXLINE];
-    //int cache_err;
+    int cache_err;
 	rio_t rio;
 
     name = strtok(request.domain, ":");
@@ -196,7 +195,7 @@ void forward_request(int fd, req_t request){
     if(portstr == NULL) portstr = "80";
     
 	// checking the cache is still updating it (age)
-	/*P(&w);
+	P(&w);
 	if((entry = in_cache(name, num_entries, cache)) != NULL){
 		// is that it?
 		V(&w);
@@ -205,7 +204,7 @@ void forward_request(int fd, req_t request){
 		Rio_writen(fd, buf, n);
 	}
 	else {
-		V(&w);*/
+		V(&w);
     	server = Open_clientfd_r(name, atoi(portstr));
     	sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
     	strcat(http, request.hdrs);
@@ -216,29 +215,26 @@ void forward_request(int fd, req_t request){
     	total_read = 0;
     	while((n = Rio_readlineb(&rio, buf, MAXLINE)) > 0){
 		
-        	//if(total_read+n > MAX_OBJECT_SIZE){
-				
+        	if(total_read+n > MAX_OBJECT_SIZE){
+		
 				// discard buf?
-			//	break;	
-			//}	
+				break;	
+			}	
 
 			total_read += n;
         	Rio_writen(fd, buf, n);
     	}
-		
-
+	
 		// cache update, critical section
 		if(total_read <= MAX_OBJECT_SIZE){
 			P(&w);
-			cache = cache_write(name, buf, num_entries, cache);
+			cache_err = cache_write(name, buf, n, num_entries, cache);
 			num_entries++;
-			//printf("num entries is now %d\n", num_entries);
 			V(&w);
 		} 
-	//}
+	}
 
     Free(request.domain);
     Free(request.path);
     Free(request.hdrs);
-
 }

@@ -7,11 +7,11 @@
 #define MAX_OBJECT_SIZE 102400
 
 typedef struct {
-	unsigned obj_size;
-	int age;
-	char * name;
-	char * buf;
-	struct cache_obj* next;
+    unsigned obj_size;
+    int age;
+    char * name;
+    char * buf;
+    struct cache_obj* next;
 } cache_obj;
 
 
