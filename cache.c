@@ -3,28 +3,36 @@
 static size_t cache_size = 0;
 static cache_obj* last = NULL;
 
+
+// checks cache for an object. Ages all other objects as well
 cache_obj* in_cache(char* name, int num_entries, cache_obj* cache){
     int i = 0;
+	cache_obj* after;
     while(i < num_entries){
         if(!strcmp(name, cache->name)){
-            //return to be read
+            // accessed most recentely, reset age
+			cache->age = 0;
+			after = cache->next;
 
-/* I think we may need to reevaluate this, or I need to have this explained to me
- * Why are we aging a cache line when we successfully find it? Usually when a cache
- * hit occurs the entires age is reset because it has been recently referenced.
- * A cache entry should be aged every time it is checked and reset if it is a hit.
- */
+			// age the rest
+			while(after != NULL){
+				after->age++;
+				after = after->next;
+			}
 
-            cache->age++;
+
             return cache;
         }
         if(cache->next == NULL)
             break;
+
+		cache->age++;
         cache = cache->next;
     }
     return NULL;
 }
 
+// initializes cache with first object inserted
 cache_obj* cache_init(cache_obj* cache, char* name, char buf[]){
     size_t alloc_size = (strlen(name)+1) + (strlen(buf)+1) + (2*sizeof(int)) + sizeof(cache_obj*);
     cache = Malloc(sizeof(cache_obj));
@@ -56,6 +64,7 @@ int set_next(cache_obj* entry){
     return 1;
 }
 
+// adds object to end of cache list. Evicts if max cache size is reached
 cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
     cache_obj* spot;
     int next_set;
@@ -85,12 +94,15 @@ cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
     return spot;
 }
 
+// free the allocated strings in the cache entry and subtract the size from the cache
 void free_spot(cache_obj* entry){
     cache_size -= entry->obj_size;
 
     Free(entry->name);
     Free(entry->buf);
 }
+
+// destruct cache
 void cache_deinit(cache_obj* cache, int num_entries){
     int i;
     cache_obj* next;
@@ -105,36 +117,22 @@ void cache_deinit(cache_obj* cache, int num_entries){
     cache_size = 0;
 }
 
-int size(cache_obj* cache, int num_entries){
-    int size = 0;
-    int i = 0;
-    // sum up obj_size of cache_obj or keep a global variable
-
-    //check that whatever is after the last entry in a full
-    //cache is NULL
-    //TODO: can we update this to use cache_size for a O(1) implementation?
-    while(i < num_entries){
-        size += cache[i].obj_size;
-        if(cache[i].next == NULL)
-            break;
-        i++;
-    }
-    return size;
-}
-
+// write to cache, will only add object since update is only to add entry
 cache_obj* cache_write(char* name, char buf[], int num_entries, cache_obj* cache){
     cache_obj* spot;
-    // check that num_entries does what it should
 
+	// first cache entry
     if(cache == NULL){
         spot = cache_init(cache, name, buf);
         return spot;
     }
-    //TODO: what's the purpose of spot here?
-    spot = add_obj(cache, num_entries, name, buf);
-    return cache;
+    
+	add_obj(cache, num_entries, name, buf);
+	
+	return cache;
 }
 
+// evict the eldest cache object that is greater than or equal to the new entry's size
 cache_obj* cache_evict(cache_obj* cache, int num_entries, size_t alloc_size){
     int i = 0;
     cache_obj* eldest = cache;
