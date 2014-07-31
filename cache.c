@@ -3,44 +3,42 @@
 static size_t cache_size = 0;
 static cache_obj* last = NULL;
 
-
 // checks cache for an object. Ages all other objects as well
 cache_obj* in_cache(char* name, int num_entries, cache_obj* cache){
     int i = 0;
-	cache_obj* after;
+    cache_obj* after;
     while(i < num_entries){
         if(!strcmp(name, cache->name)){
             // accessed most recentely, reset age
-			cache->age = 0;
-			after = cache->next;
-
-			// age the rest
-			while(after != NULL){
-				after->age++;
-				after = after->next;
-			}
-
-
+            cache->age = 0;
+            after = cache->next;
+            // age the rest
+            while(after != NULL){
+                after->age++;
+                after = after->next;
+            }
             return cache;
         }
         if(cache->next == NULL)
             break;
 
-		cache->age++;
+        cache->age++;
         cache = cache->next;
     }
     return NULL;
 }
 
-// initializes cache with first object inserted
+/* initializes cache with first object inserted
+ * Allocates memory for cache, name, and buf
+ */
 cache_obj* cache_init(cache_obj* cache, char* name, char buf[]){
     size_t alloc_size = (strlen(name)+1) + (strlen(buf)+1) + (2*sizeof(int)) + sizeof(cache_obj*);
     cache = Malloc(sizeof(cache_obj));
 
-    cache->name = (char *)Malloc(strlen(name)+1);
+    cache->name = Malloc(strlen(name)+1);
     strcpy(cache->name, name);
 
-    cache->buf = (char *)Malloc(strlen(buf)+1);
+    cache->buf = Malloc(strlen(buf)+1);
     strcpy(cache->buf, buf);
 
     cache->obj_size = alloc_size;
@@ -48,7 +46,6 @@ cache_obj* cache_init(cache_obj* cache, char* name, char buf[]){
     cache->next = NULL;
     last = cache;
     cache_size = alloc_size;
-    //TODO:check if zeroing is necessary
     return cache;
 }
 
@@ -64,7 +61,10 @@ int set_next(cache_obj* entry){
     return 1;
 }
 
-// adds object to end of cache list. Evicts if max cache size is reached
+/* adds object to end of cache list. Evicts if max cache size is reached
+ * Allocates memory for Cache (if necessary), name, and buf
+ * Frees name and buf before reallocating using free_spot()
+ */
 cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
     cache_obj* spot;
     int next_set;
@@ -74,12 +74,12 @@ cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
         spot = cache_evict(cache, num_entries, alloc_size);
         free_spot(spot);
     } else {
-        spot = (cache_obj*)Malloc(sizeof(cache_obj));
+        spot = Malloc(sizeof(cache_obj));
     }
 
-    spot->name = (char *)Malloc(strlen(name)+1);
+    spot->name = Malloc(strlen(name)+1);
 
-    spot->buf = (char *)Malloc(strlen(buf)+1);
+    spot->buf = Malloc(strlen(buf)+1);
 
     strcpy(spot->name, name);
     strcpy(spot->buf, buf);
@@ -89,20 +89,23 @@ cache_obj* add_obj(cache_obj* cache, int num_entries, char* name, char buf[]){
     spot->next = NULL;
     next_set = set_next(spot);
 
-    if(next_set == 1)
+    if(next_set == 1) //set_next failed
         return NULL;
     return spot;
 }
 
-// free the allocated strings in the cache entry and subtract the size from the cache
+/* free the allocated strings in the cache entry and subtract the size from the cache
+ * frees name and buf
+ */
 void free_spot(cache_obj* entry){
     cache_size -= entry->obj_size;
-
     Free(entry->name);
     Free(entry->buf);
 }
 
-// destruct cache
+/* destruct cache
+ * frees cache
+ */
 void cache_deinit(cache_obj* cache, int num_entries){
     int i;
     cache_obj* next;
@@ -119,17 +122,12 @@ void cache_deinit(cache_obj* cache, int num_entries){
 
 // write to cache, will only add object since update is only to add entry
 cache_obj* cache_write(char* name, char buf[], int num_entries, cache_obj* cache){
-    cache_obj* spot;
-
-	// first cache entry
-    if(cache == NULL){
-        spot = cache_init(cache, name, buf);
-        return spot;
+    // first cache entry
+    if(cache != NULL){
+        add_obj(cache, num_entries, name, buf);	
+        return cache;
     }
-    
-	add_obj(cache, num_entries, name, buf);
-	
-	return cache;
+    return cache_init(cache, name, buf);
 }
 
 // evict the eldest cache object that is greater than or equal to the new entry's size

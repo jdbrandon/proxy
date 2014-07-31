@@ -13,7 +13,6 @@
 #include <sys/socket.h>
 #include "cache.h"
 #include "sbuf.h"
-#include "csapp.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -50,7 +49,10 @@ sem_t mutex, w; 	//Mutual exclusion enforced on buffer
 int num_entries;	//Count of cache entries
 cache_obj * cache;	//Front of the Cache (implemented as a linked list)
 
-
+/* After intiall error checks, bind and listen to the provided port
+ * start some helper threads, then accept connections and place them in
+ * the shared buffer for a helper thread to process.
+ */
 int main(int argc, char** argv)
 {
     int i, listenport, listenfd, connfd;
@@ -111,6 +113,7 @@ void *thread(void *vargp){
 /* Read a request from a connection socket and parses its information into a 
  * req_t struct.
  * Initally based on csapp echo() p.911
+ * Allocates memory for request hdrs
  */
 int process_request(int fd, req_t* req){
     size_t n;
@@ -131,13 +134,13 @@ int process_request(int fd, req_t* req){
     while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){   
         if(strcmp(buf, "\r\n") == 0)
             break;
-        if(req->hdrs == NULL){
-            req->hdrs = Malloc(n+1);
-            strcpy(req->hdrs, handle_hdr(buf));
-        } else {
+        if(req->hdrs != NULL){
             n = strlen(req->hdrs) + strlen(buf) + 1;
             req->hdrs = Realloc(req->hdrs,strlen(req->hdrs)+ n);
             strcat(req->hdrs, handle_hdr(buf));
+        } else {
+            req->hdrs = Malloc(n+1);
+            strcpy(req->hdrs, handle_hdr(buf));
         }
     }
     return 0;
@@ -145,7 +148,7 @@ int process_request(int fd, req_t* req){
 
 /* Use string library functions to extract domain and path from
  * an HTTP request.
- * TODO: handle malformed HTTP requests.
+ * Allocates memory for the request domain and path
  */
 void parse_req(char* buf, req_t* req){
     char* save, *p;
@@ -162,6 +165,7 @@ void parse_req(char* buf, req_t* req){
 /* Parse a header, if it is a header that our proxy defines
  * statically replace the header with our predefined version.
  * Otherwise just add the the header to the existing header list
+ * All memory dynamically allocated by this function is freed by this function.
  */
 char *handle_hdr(char* buf){
     char* cp, * head;
@@ -191,6 +195,7 @@ char *handle_hdr(char* buf){
 
 /* Takes a request and forwards it to its destination server by opening a client
  * connection. Returns the response of the destination server.
+ * This function frees memory allocated for the request also (domain, path, and hdrs)
  */
 void forward_request(int fd, req_t request){
     int server;
@@ -202,7 +207,12 @@ void forward_request(int fd, req_t request){
     cachebuf[0] = '\0';
     name = strtok(request.domain, ":");
     portstr = strtok(NULL, ":");
-    if(name == NULL) return;
+    if(name == NULL){ 
+        Free(request.domain);
+        Free(request.path);
+        Free(request.hdrs);
+        return;
+    }
     if(portstr == NULL) portstr = "80";
     
     // checking the cache is still updating it (age)

@@ -4,15 +4,16 @@
 
 #include "csapp.h"
 
-typedef struct {
-	int *buf;
-	int n;
-	int front;
-	int rear;
-	sem_t mutex;
-	sem_t slots;
-	sem_t items;
-} sbuf_t;
+struct sbuf_t{
+    int *buf;
+    int n;
+    int front;
+    int rear;
+    sem_t mutex;
+    sem_t slots;
+    sem_t items;
+};
+typedef struct sbuf_t sbuf_t;
 
 /* Buffer array */
 /* Maximum number of slots */
