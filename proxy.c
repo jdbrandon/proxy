@@ -37,12 +37,14 @@ typedef struct sockaddr_in sockaddr_in;	//for my own sanity
 typedef struct hostent hostent; 	//ditto
 
 int process_request(int, req_t *);
-void parse_req(char*, req_t*);
+int parse_req(char*, req_t*);
 void reparse_req(req_t*);
 char *handle_hdr(char*);
 void forward_request(int, req_t);
 void free_req(req_t);
 void *thread(void* vargp);
+void not_found(int);
+void bad_request(int);
 
 /* You won't lose style points for including these long lines in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
@@ -101,19 +103,20 @@ void *thread(void *vargp){
     Pthread_detach(pthread_self());
     req_t request;
     int result;
-	
     while(1){
         int connfd = sbuf_remove(&sbuf);
         if((result = process_request(connfd, &request)) == -1){
             fprintf(stderr,"process_request failed\n");
-            exit(1);
+            bad_request(connfd);
+            free_req(request);
+            Close(connfd);
+            continue;
         }
 
         forward_request(connfd, request);
         Close(connfd);	
     }	
 }
-
 
 /* Read a request from a connection socket and parses its information into a 
  * req_t struct.
@@ -133,8 +136,9 @@ int process_request(int fd, req_t* req){
 
     //Parse domain and path information    
     Rio_readinitb(&rio, fd);
-	if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
-        parse_req(buf, req);
+    if((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0){
+        if(parse_req(buf, req) == -1)
+            return -1;
     }
     else return -1;
     //parse header information
@@ -159,17 +163,16 @@ int process_request(int fd, req_t* req){
  * returns 0 if client connection needs to be made, 1 if 
  * the content requested is local to the proxy
  */
-void parse_req(char* buf, req_t* req){
+int parse_req(char* buf, req_t* req){
     char* save, *p;
-    printf("%s\n",buf);
 
     req->pathbuf = Malloc(strlen(buf)+1);
     strcpy(req->pathbuf, buf);
-
     strtok_r(buf, " ", &save);			//GET
     strtok_r(NULL, "//", &save); 		//http:
     p = strtok_r(NULL, "/", &save);	 	//domain
-    req->domain = Malloc(strlen(p)+1);
+    if(p) req->domain = Malloc(strlen(p)+1);
+    else return -1;
     strcpy(req->domain, p);
     p = strtok_r(NULL, " ", &save);		//path
     if(strcmp(p, "HTTP/1.1\r\n") == 0 || strcmp(p, "favicon.ico") == 0){
@@ -177,15 +180,17 @@ void parse_req(char* buf, req_t* req){
         //update path to correct value 
         strtok_r(buf, "//", &save);
         p = strtok_r(NULL, " ", &save);
-        req->path = Malloc(strlen(p)+1);
+        if(p) req->path = Malloc(strlen(p)+1);
+        else return -1;
         strcpy(req->path, p);
         req->domain = Realloc(req->domain, strlen("local")+1);
         strcpy(req->domain, "local");
-        return;
+        return 0;
     }
-    req->path = Malloc(strlen(p)+1);
+    if(p) req->path = Malloc(strlen(p)+1);
+    else return -1;
     strcpy(req->path, p);
-    return;
+    return 0;
 }
 
 /* I the event that a connection fails for a request, use this function
@@ -276,11 +281,7 @@ void forward_request(int fd, req_t request){
             server = open(wdpath, O_RDONLY);
             Free(wdpath);
             if(server == -1){
-                Rio_writen(fd,"<html>\r\n", 8);
-                Rio_writen(fd,"<body>\r\n", 8);
-                Rio_writen(fd,"404: not found", 14);
-                Rio_writen(fd,"</body>\r\n", 9);
-                Rio_writen(fd,"</html>\r\n", 9);
+                not_found(fd);
                 free_req(request);
                 return;
             }
@@ -313,4 +314,26 @@ void free_req(req_t request){
     Free(request.path);
     Free(request.hdrs);
     Free(request.pathbuf);
+}
+
+/* Helper function that writes a simple html error page to a file descriptor
+ * for 404 error: not found
+ */
+void not_found(int fd){
+    Rio_writen(fd,"<html>\r\n", 8);
+    Rio_writen(fd,"<body>\r\n", 8);
+    Rio_writen(fd,"404: not found", 14);
+    Rio_writen(fd,"</body>\r\n", 9);
+    Rio_writen(fd,"</html>\r\n", 9);
+}
+
+/* Helper function that writes a simple html error page to a file descriptor
+ * for 400 error: bad request 
+ */
+void bad_request(int fd){
+    Rio_writen(fd,"<html>\r\n", 8);
+    Rio_writen(fd,"<body>\r\n", 8);
+    Rio_writen(fd,"400: bad request", 16);
+    Rio_writen(fd,"</body>\r\n", 9);
+    Rio_writen(fd,"</html>\r\n", 9);
 }
