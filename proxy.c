@@ -19,9 +19,12 @@
 #define MAX_OBJECT_SIZE 102400
 #define NTHREADS 4
 #define SBUFSIZE 16
-#define PATHBUFSZ 1024
 
 /* Struct that represents a parsed request.
+ * The buffer from which the domain and path were parsed is
+ * also stored here so that in the event of a failed connection
+ * the path can be reparsed using reparse() as though there is 
+ * no domain specified.
  */
 struct req_t {
     char* domain;
@@ -96,17 +99,11 @@ int main(int argc, char** argv)
 void *thread(void *vargp){
     // avoid memory leak
     Pthread_detach(pthread_self());
-    //sockaddr_in clientaddr = *((sockaddr_in *) vargp);
-    //hostent* clientinfo;
     req_t request;
     int result;
-    //char* haddrp;
 	
     while(1){
         int connfd = sbuf_remove(&sbuf);
-        //clientinfo = gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr,
-        //                            sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-        //haddrp = inet_ntoa(clientaddr.sin_addr);	
         if((result = process_request(connfd, &request)) == -1){
             fprintf(stderr,"process_request failed\n");
             exit(1);
@@ -184,7 +181,6 @@ void parse_req(char* buf, req_t* req){
         strcpy(req->path, p);
         req->domain = Realloc(req->domain, strlen("local")+1);
         strcpy(req->domain, "local");
-        printf("path: %s\ndomain: %s\n",req->path, req->domain);
         return;
     }
     req->path = Malloc(strlen(p)+1);
@@ -192,13 +188,18 @@ void parse_req(char* buf, req_t* req){
     return;
 }
 
+/* I the event that a connection fails for a request, use this function
+ * to reparse the request assuming the domain was not specified. Therefore
+ * we parse up to http:// and then the rest of the string until a <space> is 
+ * reached as a path to a file on the machine the proxy is running 
+ * on.
+ */
 void reparse(req_t* req){
     char* save, *p;
     strtok_r(req->pathbuf, "//", &save);
     p = strtok_r(NULL, " ", &save);
     req->path = Realloc(req->path, strlen(p) + 1);
     strcpy(req->path, p);
-    printf("newpath:%s\n",req->path);
 }
 
 /* Parse a header, if it is a header that our proxy defines
@@ -235,7 +236,7 @@ char *handle_hdr(char* buf){
 
 /* Takes a request and forwards it to its destination server by opening a client
  * connection. Returns the response of the destination server.
- * This function frees memory allocated for the request also (domain, path, and hdrs)
+ * This function frees memory allocated for the request also using free_req() 
  */
 void forward_request(int fd, req_t request){
     int server;
@@ -272,7 +273,6 @@ void forward_request(int fd, req_t request){
             wdpath = getcwd(NULL,0);
             wdpath = Realloc(wdpath, strlen(wdpath) + strlen(request.path) +1);
             strcat(wdpath, request.path);
-            printf("opening: %s::%s\n", wdpath,request.path);
             server = open(wdpath, O_RDONLY);
             Free(wdpath);
             if(server == -1){
@@ -306,6 +306,8 @@ void forward_request(int fd, req_t request){
     free_req(request);
 }
 
+/* Helper function to free allocations made for a request
+ */
 void free_req(req_t request){
     Free(request.domain);
     Free(request.path);
