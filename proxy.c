@@ -54,7 +54,7 @@ static const char *conn_hdr = "Connection: close\r\n";
 static const char *prox_hdr = "Proxy-Connection: close\r\n";
 
 sbuf_t sbuf; 		//Shared buffer
-sem_t mutex, w; 	//Mutual exclusion enforced on buffer
+sem_t w; 			//Mutual exclusion enforced on buffer
 int num_entries;	//Count of cache entries
 cache_obj * cache;	//Front of the Cache (implemented as a linked list)
 
@@ -74,7 +74,6 @@ int main(int argc, char** argv)
         exit(1);
     }
     
-    Sem_init(&mutex, 0, 1);
     Sem_init(&w, 0, 1);
     num_entries = 0;
     cache = NULL;
