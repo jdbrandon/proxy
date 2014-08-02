@@ -775,7 +775,7 @@ int open_clientfd_r(char *hostname, int port) {
     sprintf(port_str, "%d", port);
     if ((rv = getaddrinfo(hostname, port_str, NULL, &addlist)) != 0) {
         fprintf(stderr, "addrinfo %s %s", hostname, port_str);
-        return -1;
+        return -2;
     }
   
     /* Walk the list, using each addrinfo to try to connect */
@@ -855,6 +855,7 @@ int Open_clientfd_r(char *hostname, int port)
     int rc;
 
     if ((rc = open_clientfd_r(hostname, port)) < 0) {
+        if(rc == -2) return -1;
         unix_error("Open_clientfd_r error");
     }
     return rc;

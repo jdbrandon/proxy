@@ -19,6 +19,7 @@
 #define MAX_OBJECT_SIZE 102400
 #define NTHREADS 4
 #define SBUFSIZE 16
+#define PATHBUFSZ 1024
 
 /* Struct that represents a parsed request.
  */
@@ -26,6 +27,7 @@ struct req_t {
     char* domain;
     char* path;
     char* hdrs;
+    char* pathbuf;
 };
 typedef struct req_t req_t;
 typedef struct sockaddr_in sockaddr_in;	//for my own sanity
@@ -33,8 +35,10 @@ typedef struct hostent hostent; 	//ditto
 
 int process_request(int, req_t *);
 void parse_req(char*, req_t*);
+void reparse_req(req_t*);
 char *handle_hdr(char*);
 void forward_request(int, req_t);
+void free_req(req_t);
 void *thread(void* vargp);
 
 /* You won't lose style points for including these long lines in your code */
@@ -92,18 +96,22 @@ int main(int argc, char** argv)
 void *thread(void *vargp){
     // avoid memory leak
     Pthread_detach(pthread_self());
-    sockaddr_in clientaddr = *((sockaddr_in *) vargp);
-    hostent* clientinfo;
+    //sockaddr_in clientaddr = *((sockaddr_in *) vargp);
+    //hostent* clientinfo;
     req_t request;
-    char* haddrp;
+    int result;
+    //char* haddrp;
 	
     while(1){
         int connfd = sbuf_remove(&sbuf);
-        clientinfo = gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr,
-                                    sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-        haddrp = inet_ntoa(clientaddr.sin_addr);	
-        // switch to Open_clientfd_r?
-        process_request(connfd, &request);
+        //clientinfo = gethostbyaddr((const char*)&clientaddr.sin_addr.s_addr,
+        //                            sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+        //haddrp = inet_ntoa(clientaddr.sin_addr);	
+        if((result = process_request(connfd, &request)) == -1){
+            fprintf(stderr,"process_request failed\n");
+            exit(1);
+        }
+
         forward_request(connfd, request);
         Close(connfd);	
     }	
@@ -114,6 +122,8 @@ void *thread(void *vargp){
  * req_t struct.
  * Initally based on csapp echo() p.911
  * Allocates memory for request hdrs
+ * returns -1 on failure, 1 if the content is local, and 0 if the content is
+ * remote
  */
 int process_request(int fd, req_t* req){
     size_t n;
@@ -149,17 +159,46 @@ int process_request(int fd, req_t* req){
 /* Use string library functions to extract domain and path from
  * an HTTP request.
  * Allocates memory for the request domain and path
+ * returns 0 if client connection needs to be made, 1 if 
+ * the content requested is local to the proxy
  */
 void parse_req(char* buf, req_t* req){
     char* save, *p;
+    printf("%s\n",buf);
+
+    req->pathbuf = Malloc(strlen(buf)+1);
+    strcpy(req->pathbuf, buf);
+
     strtok_r(buf, " ", &save);			//GET
     strtok_r(NULL, "//", &save); 		//http:
     p = strtok_r(NULL, "/", &save);	 	//domain
     req->domain = Malloc(strlen(p)+1);
     strcpy(req->domain, p);
     p = strtok_r(NULL, " ", &save);		//path
+    if(strcmp(p, "HTTP/1.1\r\n") == 0 || strcmp(p, "favicon.ico") == 0){
+        //no domain specified use localhost
+        //update path to correct value 
+        strtok_r(buf, "//", &save);
+        p = strtok_r(NULL, " ", &save);
+        req->path = Malloc(strlen(p)+1);
+        strcpy(req->path, p);
+        req->domain = Realloc(req->domain, strlen("local")+1);
+        strcpy(req->domain, "local");
+        printf("path: %s\ndomain: %s\n",req->path, req->domain);
+        return;
+    }
     req->path = Malloc(strlen(p)+1);
     strcpy(req->path, p);
+    return;
+}
+
+void reparse(req_t* req){
+    char* save, *p;
+    strtok_r(req->pathbuf, "//", &save);
+    p = strtok_r(NULL, " ", &save);
+    req->path = Realloc(req->path, strlen(p) + 1);
+    strcpy(req->path, p);
+    printf("newpath:%s\n",req->path);
 }
 
 /* Parse a header, if it is a header that our proxy defines
@@ -170,7 +209,8 @@ void parse_req(char* buf, req_t* req){
 char *handle_hdr(char* buf){
     char* cp, * head;
     size_t size;
-    size = strlen(buf) > strlen(user_agent_hdr) ? strlen(buf) : strlen(user_agent_hdr);
+    size = strlen(buf) > strlen(user_agent_hdr) ? strlen(buf) \
+                                                : strlen(user_agent_hdr);
     cp = (char*) Malloc(size+1);
     head = (char*) Malloc(51);
     strcpy(cp, buf);
@@ -208,9 +248,7 @@ void forward_request(int fd, req_t request){
     name = strtok(request.domain, ":");
     portstr = strtok(NULL, ":");
     if(name == NULL){ 
-        Free(request.domain);
-        Free(request.path);
-        Free(request.hdrs);
+        free_req(request);
         return;
     }
     if(portstr == NULL) portstr = "80";
@@ -222,12 +260,31 @@ void forward_request(int fd, req_t request){
         Rio_writen(fd, entry->buf, entry->obj_size);
     } else {
         V(&w);
-
-    	server = Open_clientfd_r(name, atoi(portstr));
-    	sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
-    	strcat(http, request.hdrs);
-    	Rio_writen(server, http, strlen(http));
-    	Rio_writen(server, "\r\n", 2);
+         server = Open_clientfd_r(name, atoi(portstr));
+         if(server != -1){
+            sprintf(http, "GET /%s HTTP/1.0\r\n", request.path);
+            strcat(http, request.hdrs);
+            Rio_writen(server, http, strlen(http));
+            Rio_writen(server, "\r\n", 2);
+        } else {
+            reparse(&request);
+            char *wdpath;
+            wdpath = getcwd(NULL,0);
+            wdpath = Realloc(wdpath, strlen(wdpath) + strlen(request.path) +1);
+            strcat(wdpath, request.path);
+            printf("opening: %s::%s\n", wdpath,request.path);
+            server = open(wdpath, O_RDONLY);
+            Free(wdpath);
+            if(server == -1){
+                Rio_writen(fd,"<html>\r\n", 8);
+                Rio_writen(fd,"<body>\r\n", 8);
+                Rio_writen(fd,"404: not found", 14);
+                Rio_writen(fd,"</body>\r\n", 9);
+                Rio_writen(fd,"</html>\r\n", 9);
+                free_req(request);
+                return;
+            }
+        }
     	Rio_readinitb(&rio, server);
 
     	total_read = 0;
@@ -246,7 +303,12 @@ void forward_request(int fd, req_t request){
             V(&w);
         } 
     }
+    free_req(request);
+}
+
+void free_req(req_t request){
     Free(request.domain);
     Free(request.path);
     Free(request.hdrs);
+    Free(request.pathbuf);
 }
